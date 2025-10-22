@@ -1,0 +1,249 @@
+#!/usr/bin/env bash
+
+# BATMAN API Testing Framework - Helper Functions
+# Generated for {{ api.name }} v{{ api.version }}
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Configuration
+API_BASE_URL="{{ target_api.base_url }}"
+TIMEOUT="{{ target_api.timeout | default(30) }}"
+MAX_RETRIES="{{ target_api.retries | default(3) }}"
+
+# Default headers
+declare -a DEFAULT_HEADERS=(
+{% for key, value in target_api.headers.items() %}
+    "{{ key }}: {{ value }}"
+{% endfor %}
+)
+
+# Authentication
+{% if target_api.auth %}
+{% if target_api.auth.type == "bearer" %}
+AUTH_TOKEN="{{ target_api.auth.token }}"
+{% elif target_api.auth.type == "basic" %}
+AUTH_USERNAME="{{ target_api.auth.username }}"
+AUTH_PASSWORD="{{ target_api.auth.password }}"
+{% elif target_api.auth.type == "api_key" %}
+API_KEY="{{ target_api.auth.api_key }}"
+API_KEY_HEADER="{{ target_api.auth.api_key_header | default('X-API-Key') }}"
+{% endif %}
+{% endif %}
+
+# Test counters
+TOTAL_TESTS=0
+PASSED_TESTS=0
+FAILED_TESTS=0
+
+# Generic HTTP request function
+make_request() {
+    local method="$1"
+    local endpoint="$2"
+    local data="$3"
+    local headers="$4"
+    
+    local url="${API_BASE_URL}${endpoint}"
+    local curl_opts=(-s -X "$method" "$url" -i --max-time "$TIMEOUT")
+    
+    # Add default headers
+    for header in "${DEFAULT_HEADERS[@]}"; do
+        curl_opts+=(-H "$header")
+    done
+    
+    # Add authentication
+    {% if target_api.auth %}
+    {% if target_api.auth.type == "bearer" %}
+    if [ -n "$AUTH_TOKEN" ]; then
+        curl_opts+=(-H "Authorization: Bearer $AUTH_TOKEN")
+    fi
+    {% elif target_api.auth.type == "basic" %}
+    if [ -n "$AUTH_USERNAME" ] && [ -n "$AUTH_PASSWORD" ]; then
+        curl_opts+=(-u "$AUTH_USERNAME:$AUTH_PASSWORD")
+    fi
+    {% elif target_api.auth.type == "api_key" %}
+    if [ -n "$API_KEY" ]; then
+        curl_opts+=(-H "$API_KEY_HEADER: $API_KEY")
+    fi
+    {% endif %}
+    {% endif %}
+    
+    # Add custom headers
+    if [ -n "$headers" ]; then
+        curl_opts+=(-H "$headers")
+    fi
+    
+    # Add data for POST/PUT requests
+    if [ -n "$data" ]; then
+        curl_opts+=(-H "Content-Type: application/json" -d "$data")
+    fi
+    
+    curl "${curl_opts[@]}"
+}
+
+# Extract status code from response
+extract_status_code() {
+    local response="$1"
+    echo "$response" | head -n 1 | cut -d' ' -f2
+}
+
+# Extract response body
+extract_response_body() {
+    local response="$1"
+    echo "$response" | sed '1,/^$/d'
+}
+
+# Extract JSON field value
+extract_json_field() {
+    local response="$1"
+    local field="$2"
+    local body=$(extract_response_body "$response")
+    echo "$body" | jq -r ".$field" 2>/dev/null || echo ""
+}
+
+# Check status code
+check_status_code() {
+    local response="$1"
+    local expected="$2"
+    local status=$(extract_status_code "$response")
+    
+    if [ "$status" = "$expected" ]; then
+        echo -e "${GREEN}✓${NC} Status code $status"
+        return 0
+    else
+        echo -e "${RED}✗${NC} Expected status $expected, got $status"
+        return 1
+    fi
+}
+
+# Validate JSON schema
+validate_json_schema() {
+    local response="$1"
+    local schema_name="$2"
+    local body=$(extract_response_body "$response")
+    
+    if command -v jsonschema >/dev/null 2>&1; then
+        echo "$body" | jsonschema "${SCHEMA_DIR}/${schema_name}.json" 2>/dev/null
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}✓${NC} JSON schema validation passed"
+            return 0
+        else
+            echo -e "${RED}✗${NC} JSON schema validation failed"
+            return 1
+        fi
+    else
+        echo -e "${YELLOW}⚠${NC} jsonschema not available, skipping validation"
+        return 0
+    fi
+}
+
+# Validate error response
+validate_error_response() {
+    local response="$1"
+    local error_type="$2"
+    local body=$(extract_response_body "$response")
+    
+    # Check if error response has expected structure
+    local error_field=$(echo "$body" | jq -r '.error // .message // .detail' 2>/dev/null)
+    if [ -n "$error_field" ] && [ "$error_field" != "null" ]; then
+        echo -e "${GREEN}✓${NC} Error response validation passed"
+        return 0
+    else
+        echo -e "${RED}✗${NC} Error response validation failed"
+        return 1
+    fi
+}
+
+# Generate test data
+generate_test_data() {
+    local schema_name="$1"
+    local template_file="${TEMPLATE_DIR}/test-data/${schema_name}.json"
+    
+    if [ -f "$template_file" ]; then
+        cat "$template_file"
+    else
+        generate_basic_test_data "$schema_name"
+    fi
+}
+
+# Generate basic test data
+generate_basic_test_data() {
+    local schema_name="$1"
+    case "$schema_name" in
+        "User"|"user")
+            echo '{"name": "Test User", "email": "test@example.com"}'
+            ;;
+        "Product"|"product")
+            echo '{"name": "Test Product", "price": 99.99}'
+            ;;
+        *)
+            echo '{"id": "test-id", "name": "Test Item"}'
+            ;;
+    esac
+}
+
+# Test setup
+setup_test() {
+    TOTAL_TESTS=$((TOTAL_TESTS + 1))
+    echo -e "${BLUE}Running test: $1${NC}"
+}
+
+# Test teardown
+teardown_test() {
+    if [ $? -eq 0 ]; then
+        PASSED_TESTS=$((PASSED_TESTS + 1))
+        echo -e "${GREEN}✓ Test passed${NC}"
+    else
+        FAILED_TESTS=$((FAILED_TESTS + 1))
+        echo -e "${RED}✗ Test failed${NC}"
+    fi
+    echo ""
+}
+
+# Print test summary
+print_test_summary() {
+    echo -e "${BLUE}=== Test Summary ===${NC}"
+    echo -e "Total tests: $TOTAL_TESTS"
+    echo -e "${GREEN}Passed: $PASSED_TESTS${NC}"
+    echo -e "${RED}Failed: $FAILED_TESTS${NC}"
+    
+    if [ $FAILED_TESTS -eq 0 ]; then
+        echo -e "${GREEN}All tests passed!${NC}"
+        return 0
+    else
+        echo -e "${RED}Some tests failed!${NC}"
+        return 1
+    fi
+}
+
+# Wait for API to be ready
+wait_for_api() {
+    local max_attempts=30
+    local attempt=1
+    
+    echo -e "${YELLOW}Waiting for API to be ready...${NC}"
+    
+    while [ $attempt -le $max_attempts ]; do
+        if make_request "GET" "/health" >/dev/null 2>&1; then
+            echo -e "${GREEN}✓ API is ready${NC}"
+            return 0
+        fi
+        
+        echo -e "${YELLOW}Attempt $attempt/$max_attempts - API not ready yet${NC}"
+        sleep 2
+        attempt=$((attempt + 1))
+    done
+    
+    echo -e "${RED}✗ API failed to become ready${NC}"
+    return 1
+}
+
+# Cleanup function
+cleanup() {
+    echo -e "${YELLOW}Cleaning up...${NC}"
+    # Add any cleanup logic here
+}

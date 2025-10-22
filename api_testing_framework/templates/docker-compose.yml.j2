@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  api-testing:
+    build: 
+      context: {{ docker.build_context | default('.') }}
+      dockerfile: Dockerfile
+    container_name: batman-api-testing
+    volumes:
+      - ./generated/tests:/tests
+      - ./reports:/reports
+      - ./config:/config
+    environment:
+      - API_BASE_URL={{ target_api.base_url }}
+      - TEST_ENVIRONMENT={{ execution.environment }}
+      {% if target_api.auth %}
+      {% if target_api.auth.type == "bearer" %}
+      - AUTH_TOKEN={{ target_api.auth.token }}
+      {% elif target_api.auth.type == "basic" %}
+      - AUTH_USERNAME={{ target_api.auth.username }}
+      - AUTH_PASSWORD={{ target_api.auth.password }}
+      {% elif target_api.auth.type == "api_key" %}
+      - API_KEY={{ target_api.auth.api_key }}
+      - API_KEY_HEADER={{ target_api.auth.api_key_header | default('X-API-Key') }}
+      {% endif %}
+      {% endif %}
+    {% if docker.services %}
+    depends_on:
+      {% for service in docker.services %}
+      - {{ service }}
+      {% endfor %}
+    {% endif %}
+    command: ["bats", "/tests"]
+    networks:
+      - batman-network
+
+{% if docker.services %}
+{% for service in docker.services %}
+  {{ service }}:
+    image: {{ service }}:latest
+    networks:
+      - batman-network
+{% endfor %}
+{% endif %}
+
+networks:
+  batman-network:
+    driver: bridge

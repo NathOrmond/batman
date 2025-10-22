@@ -1,0 +1,5 @@
+{
+  {% for field_name, field_schema in schema.properties.items() %}
+  "{{ field_name }}": {% if field_name in schema.required %}{{ field_schema | generate_test_data }}{% else %}null{% endif %}{% if not loop.last %},{% endif %}
+  {% endfor %}
+}

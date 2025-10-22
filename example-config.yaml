@@ -1,0 +1,47 @@
+api:
+  name: "Example Weather API"
+  version: "1.0.0"
+  description: "A simple weather API for testing BATMAN framework"
+
+openapi:
+  spec_url: "https://api.openweathermap.org/data/2.5/weather"
+
+target_api:
+  base_url: "https://api.openweathermap.org/data/2.5"
+  timeout: 30
+  retries: 3
+  headers:
+    Content-Type: "application/json"
+  auth:
+    type: "api_key"
+    api_key: "${OPENWEATHER_API_KEY}"
+    api_key_header: "appid"
+
+test_generation:
+  output_dir: "generated/tests"
+  templates: ["basic", "crud", "error_handling"]
+  exclude_endpoints: []
+  include_only: []
+
+execution:
+  environment: "local"
+  parallel: true
+  max_parallel: 4
+  timeout: 300
+  retry_failed: 1
+  read_only: false
+
+validation:
+  strict_mode: false
+  validate_responses: true
+  validate_schemas: true
+  check_contract_compliance: true
+
+docker:
+  enabled: false
+
+reporting:
+  format: ["console", "json"]
+  output_dir: "reports"
+  include_request_logs: true
+  include_response_logs: true
