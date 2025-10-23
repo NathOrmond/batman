@@ -29,7 +29,7 @@ A standalone, configuration-driven testing solution that automatically generates
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone git@github.com:NathOrmond/batman.git
 cd batman
 
 # Install dependencies
